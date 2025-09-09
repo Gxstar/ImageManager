@@ -31,22 +31,26 @@
      <widget class="QWidget" name="left_sidebar" native="true">
       <property name="minimumSize">
        <size>
-        <width>200</width>
+        <width>240</width>
         <height>0</height>
        </size>
       </property>
       <property name="maximumSize">
        <size>
-        <width>250</width>
+        <width>280</width>
         <height>16777215</height>
        </size>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">background-color: #2c3e50; color: #ecf0f1;</string>
       </property>
       <layout class="QVBoxLayout" name="verticalLayout_2">
        <item>
         <widget class="QLabel" name="label_title">
          <property name="font">
           <font>
-           <pointsize>16</pointsize>
+           <pointsize>18</pointsize>
+           <weight>75</weight>
            <bold>true</bold>
           </font>
          </property>
@@ -56,20 +60,45 @@
          <property name="alignment">
           <set>Qt::AlignmentFlag::AlignCenter</set>
          </property>
+         <property name="styleSheet">
+          <string notr="true">color: #3498db; padding: 10px;</string>
+         </property>
         </widget>
        </item>
        <item>
         <widget class="QListWidget" name="listWidget_main_nav">
          <property name="font">
           <font>
-           <pointsize>11</pointsize>
+           <pointsize>12</pointsize>
           </font>
          </property>
          <property name="iconSize">
           <size>
-           <width>20</width>
-           <height>20</height>
+           <width>24</width>
+           <height>24</height>
           </size>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">
+QListWidget {
+    background-color: #34495e;
+    border: none;
+    outline: none;
+}
+QListWidget::item {
+    color: #ecf0f1;
+    padding: 12px 16px;
+    border-bottom: 1px solid #2c3e50;
+}
+QListWidget::item:selected {
+    background-color: #3498db;
+    color: white;
+    border-left: 4px solid #2980b9;
+}
+QListWidget::item:hover {
+    background-color: #3d566e;
+}
+          </string>
          </property>
          <item>
           <property name="text">
@@ -106,12 +135,16 @@
           <widget class="QLabel" name="label_local_dir">
            <property name="font">
             <font>
-             <pointsize>10</pointsize>
+             <pointsize>12</pointsize>
+             <weight>75</weight>
              <bold>true</bold>
             </font>
            </property>
            <property name="text">
             <string>本地目录</string>
+           </property>
+           <property name="styleSheet">
+            <string notr="true">color: #bdc3c7; padding: 5px;</string>
            </property>
           </widget>
          </item>
@@ -166,7 +199,7 @@
         <widget class="QPushButton" name="pushButton_settings">
          <property name="font">
           <font>
-           <pointsize>11</pointsize>
+           <pointsize>12</pointsize>
           </font>
          </property>
          <property name="text">
@@ -197,12 +230,16 @@
            <widget class="QLabel" name="label_all_photos">
             <property name="font">
              <font>
-              <pointsize>14</pointsize>
+              <pointsize>16</pointsize>
+              <weight>75</weight>
               <bold>true</bold>
              </font>
             </property>
             <property name="text">
              <string>全部照片</string>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">color: #2c3e50; padding: 5px;</string>
             </property>
            </widget>
           </item>
@@ -215,6 +252,9 @@
             </property>
             <property name="text">
              <string>60 张照片</string>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">color: #7f8c8d; padding: 5px;</string>
             </property>
            </widget>
           </item>

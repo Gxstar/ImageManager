@@ -9,4 +9,5 @@ dependencies = [
     "pillow-heif>=1.1.0",
     "pyside6>=6.9.2",
     "qt-material>=2.17",
+    "qtawesome>=1.4.0",
 ]
