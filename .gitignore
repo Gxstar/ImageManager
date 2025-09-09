@@ -8,3 +8,45 @@ wheels/
 
 # Virtual environments
 .venv
+
+# PySide6 specific files
+*.qrc
+*.qmlc
+*.jsc
+*.pyproject
+*.pyc
+*.pyo
+*.pyd
+
+# Qt Designer files
+*.ui.autosave
+*.ui.bak
+
+# Qt Creator files
+*.user
+*.user.*
+CMakeLists.txt.user
+*.pro.user
+*.pro.user.*
+
+# PyInstaller build files
+*.spec
+build/
+dist/
+__pycache__/
+*.pyc
+
+# Qt resource files
+*.qrc.py
+*_rc.py
+
+# IDE specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS specific files
+.DS_Store
+Thumbs.db
