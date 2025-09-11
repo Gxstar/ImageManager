@@ -50,18 +50,17 @@
          <property name="font">
           <font>
            <pointsize>18</pointsize>
-           <weight>75</weight>
            <bold>true</bold>
           </font>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">color: #3498db; padding: 10px;</string>
          </property>
          <property name="text">
           <string>照片管理器</string>
          </property>
          <property name="alignment">
           <set>Qt::AlignmentFlag::AlignCenter</set>
-         </property>
-         <property name="styleSheet">
-          <string notr="true">color: #3498db; padding: 10px;</string>
          </property>
         </widget>
        </item>
@@ -71,12 +70,6 @@
           <font>
            <pointsize>12</pointsize>
           </font>
-         </property>
-         <property name="iconSize">
-          <size>
-           <width>24</width>
-           <height>24</height>
-          </size>
          </property>
          <property name="styleSheet">
           <string notr="true">
@@ -99,6 +92,12 @@ QListWidget::item:hover {
     background-color: #3d566e;
 }
           </string>
+         </property>
+         <property name="iconSize">
+          <size>
+           <width>24</width>
+           <height>24</height>
+          </size>
          </property>
          <item>
           <property name="text">
@@ -136,15 +135,14 @@ QListWidget::item:hover {
            <property name="font">
             <font>
              <pointsize>12</pointsize>
-             <weight>75</weight>
              <bold>true</bold>
             </font>
            </property>
-           <property name="text">
-            <string>本地目录</string>
-           </property>
            <property name="styleSheet">
             <string notr="true">color: #bdc3c7; padding: 5px;</string>
+           </property>
+           <property name="text">
+            <string>本地目录</string>
            </property>
           </widget>
          </item>
@@ -231,15 +229,14 @@ QListWidget::item:hover {
             <property name="font">
              <font>
               <pointsize>16</pointsize>
-              <weight>75</weight>
               <bold>true</bold>
              </font>
             </property>
-            <property name="text">
-             <string>全部照片</string>
-            </property>
             <property name="styleSheet">
              <string notr="true">color: #2c3e50; padding: 5px;</string>
+            </property>
+            <property name="text">
+             <string>全部照片</string>
             </property>
            </widget>
           </item>
@@ -250,11 +247,11 @@ QListWidget::item:hover {
               <pointsize>12</pointsize>
              </font>
             </property>
-            <property name="text">
-             <string>60 张照片</string>
-            </property>
             <property name="styleSheet">
              <string notr="true">color: #7f8c8d; padding: 5px;</string>
+            </property>
+            <property name="text">
+             <string>60 张照片</string>
             </property>
            </widget>
           </item>
@@ -421,11 +418,11 @@ QListWidget::item:hover {
               <rect>
                <x>0</x>
                <y>0</y>
-               <width>532</width>
-               <height>336</height>
+               <width>513</width>
+               <height>248</height>
               </rect>
              </property>
-             <layout class="QVBoxLayout" name="verticalLayout_5">
+             <layout class="QHBoxLayout" name="horizontalLayout_5">
               <property name="spacing">
                <number>15</number>
               </property>
@@ -752,19 +749,19 @@ QListWidget::item:hover {
                     </widget>
                    </item>
                    <item row="1" column="0">
-                    <widget class="QLabel" name="label_copyright">
+                    <widget class="QLabel" name="label_location">
                      <property name="font">
                       <font>
                        <pointsize>9</pointsize>
                       </font>
                      </property>
                      <property name="text">
-                      <string>版权信息：</string>
+                      <string>地理位置：</string>
                      </property>
                     </widget>
                    </item>
                    <item row="1" column="1">
-                    <widget class="QLabel" name="value_copyright">
+                    <widget class="QLabel" name="value_location">
                      <property name="font">
                       <font>
                        <pointsize>9</pointsize>
