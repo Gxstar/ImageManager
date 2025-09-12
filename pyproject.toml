@@ -12,3 +12,7 @@ dependencies = [
     "qtawesome>=1.4.0",
     "sqlalchemy>=2.0.43",
 ]
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple"
+default = true
