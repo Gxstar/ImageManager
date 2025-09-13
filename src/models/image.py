@@ -33,7 +33,7 @@ class Image(Base):
     gps_longitude = Column(Float)
     gps_altitude = Column(Float)
     location = Column(Text)
-    orientation = Column(Integer)
+    orientation = Column(String(50))
     color_space = Column(String(20))
     white_balance = Column(String(20))
     metering_mode = Column(String(20))

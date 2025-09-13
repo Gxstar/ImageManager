@@ -217,7 +217,7 @@ class MainWindow(QMainWindow):
             action()
     
     def _add_directory(self):
-        """添加目录到数据库"""
+        """添加目录到数据库并自动扫描"""
         if not DatabaseInitializer.check_database_health()['healthy']:
             QMessageBox.warning(self, "警告", "数据库未初始化")
             return
@@ -245,10 +245,36 @@ class MainWindow(QMainWindow):
                     # 刷新TreeWidget显示
                     self._refresh_directories()
                     
-                    QMessageBox.information(self, "成功", f"已添加目录: {dir_name}")
+                    # 自动启动扫描新添加的目录
+                    self._scan_single_directory(normalized_path, dir_name)
+                    
+                    QMessageBox.information(self, "成功", f"已添加目录: {dir_name}，正在扫描图片...")
                     
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"添加目录失败: {str(e)}")
+                
+    def _scan_single_directory(self, directory_path, dir_name):
+        """扫描单个目录"""
+        if not os.path.exists(directory_path):
+            return
+            
+        self.status_label.setText(f"正在扫描目录: {dir_name}...")
+        self.progress_bar.setVisible(True)
+        
+        # 创建并启动扫描线程
+        self.scanner_thread = ImageScannerThread([directory_path])
+        self.scanner_thread.progress_updated.connect(self._on_scan_progress)
+        self.scanner_thread.scan_completed.connect(
+            lambda count: self._on_single_scan_completed(count, dir_name)
+        )
+        self.scanner_thread.scan_error.connect(self._on_scan_error)
+        self.scanner_thread.start()
+        
+    def _on_single_scan_completed(self, count, dir_name):
+        """单个目录扫描完成"""
+        self.progress_bar.setVisible(False)
+        self.status_label.setText(f"扫描完成：{dir_name} ({count} 张图片)")
+        QMessageBox.information(self, "扫描完成", f"目录 {dir_name} 扫描完成，共发现 {count} 张图片")
     
     def _load_directories(self):
         """从数据库加载目录到TreeWidget，包含子目录"""
@@ -452,18 +478,47 @@ class MainWindow(QMainWindow):
                     # 确认删除
                     reply = QMessageBox.question(
                         self, "确认删除", 
-                        f"确定要从列表中移除目录 '{directory.name}' 吗？\n\n路径: {directory.path}",
+                        f"确定要从数据库中完全删除目录 '{directory.name}' 吗？\n\n"
+                        f"路径: {directory.path}\n\n"
+                        f"注意：此操作将同时删除该目录下的所有图片记录！",
                         QMessageBox.Yes | QMessageBox.No,
                         QMessageBox.No
                     )
                     
                     if reply == QMessageBox.Yes:
-                        directory.is_active = False  # 软删除
+                        # 获取该目录下的所有图片信息
+                        images = db.query(Image).filter(Image.directory_id == directory.id).all()
+                        image_ids = [img.id for img in images]
+                        
+                        # 收集需要删除的缩略图文件路径
+                        thumbnail_paths = []
+                        if image_ids:
+                            thumbnails = db.query(Thumbnail).filter(Thumbnail.image_id.in_(image_ids)).all()
+                            thumbnail_paths = [thumb.thumbnail_path for thumb in thumbnails if thumb.thumbnail_path and os.path.exists(thumb.thumbnail_path)]
+                        
+                        # 删除生成的缩略图文件
+                        import os
+                        for thumb_path in thumbnail_paths:
+                            try:
+                                os.remove(thumb_path)
+                            except (OSError, IOError) as e:
+                                # 如果删除失败，记录错误但不中断流程
+                                print(f"删除缩略图文件失败: {thumb_path} - {e}")
+                        
+                        # 删除相关的缩略图数据库记录
+                        if image_ids:
+                            db.query(Thumbnail).filter(Thumbnail.image_id.in_(image_ids)).delete(synchronize_session=False)
+                        
+                        # 删除该目录下的所有图片数据库记录
+                        db.query(Image).filter(Image.directory_id == directory.id).delete(synchronize_session=False)
+                        
+                        # 删除目录数据库记录
+                        db.delete(directory)
                         db.commit()
                         
                         # 刷新显示
                         self._refresh_directories()
-                        QMessageBox.information(self, "成功", "目录已成功移除")
+                        QMessageBox.information(self, "成功", "目录及相关记录已删除，本地图片文件保留")
                 else:
                     # 获取所有活跃目录供用户参考
                     active_dirs = db.query(Directory).filter(Directory.is_active == True).all()
