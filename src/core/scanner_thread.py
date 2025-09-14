@@ -343,8 +343,25 @@ class ImageScannerThread(QThread):
         except:
             return None
     
+    def _get_rotation_angle(self, image_path):
+        """根据EXIF方向信息获取旋转角度"""
+        try:
+            exif_dict = piexif.load(image_path)
+            if piexif.ImageIFD.Orientation in exif_dict['0th']:
+                orientation = exif_dict['0th'][piexif.ImageIFD.Orientation]
+                orientation_map = {
+                    1: 0,   # Horizontal (normal)
+                    3: 180, # Rotate 180
+                    6: 90,  # Rotate 90 CW
+                    8: 270  # Rotate 270 CW
+                }
+                return orientation_map.get(int(orientation), 0)
+        except:
+            pass
+        return 0
+    
     def _create_thumbnail(self, image_path, image_id):
-        """创建缩略图"""
+        """创建缩略图（带方向修正）"""
         try:
             # 生成缩略图文件名
             file_hash = hashlib.md5(str(image_path).encode()).hexdigest()
@@ -354,6 +371,9 @@ class ImageScannerThread(QThread):
             # 如果缩略图已存在，直接返回路径
             if thumbnail_path.exists():
                 return str(thumbnail_path)
+            
+            # 获取旋转角度
+            rotation_angle = self._get_rotation_angle(image_path)
             
             # 创建缩略图
             with PILImage.open(image_path) as img:
@@ -366,6 +386,10 @@ class ImageScannerThread(QThread):
                     img = background
                 elif img.mode != 'RGB':
                     img = img.convert('RGB')
+                
+                # 根据EXIF方向旋转图片
+                if rotation_angle != 0:
+                    img = img.rotate(rotation_angle, expand=True)
                 
                 # 计算缩略图尺寸（保持宽高比）
                 img.thumbnail((150, 150), PILImage.Resampling.LANCZOS)

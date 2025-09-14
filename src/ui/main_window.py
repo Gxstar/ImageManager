@@ -13,9 +13,13 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from PySide6.QtWidgets import (QApplication, QMainWindow, QFileDialog, 
-                             QMessageBox, QTreeWidgetItem, QMenu, QProgressBar, QLabel)
-from PySide6.QtCore import Qt, QThread, Signal, QTimer
-from PySide6.QtGui import QPixmap, QImage, QPainter, QFont, QFontDatabase
+                              QMessageBox, QTreeWidgetItem, QMenu, QProgressBar, QLabel,
+                              QListView, QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
+                              QScrollArea)
+from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSize
+from PySide6.QtGui import (QPixmap, QImage, QPainter, QFont, QFontDatabase,
+                           QStandardItemModel, QStandardItem, QKeySequence, QTransform,
+                           QShortcut)
 import PySide6.QtGui as QtGui
 from src.core.scanner_thread import ImageScannerThread
 from PySide6.QtUiTools import QUiLoader
@@ -25,6 +29,239 @@ import qtawesome as qta
 from src.core.initializer import DatabaseInitializer
 from src.core.database import get_db
 from src.models.directory import Directory
+from src.models.image import Image
+from src.models.thumbnail import Thumbnail
+
+from PySide6.QtWidgets import (QMainWindow, QApplication, QFileDialog, QMessageBox, 
+                              QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, 
+                              QDialog, QListWidgetItem, QTreeWidgetItem, QProgressDialog)
+from PySide6.QtCore import Qt, QThread, Signal, QDir, QTimer, QSettings, QSize, QUrl, QEvent
+from PySide6.QtGui import QPixmap, QImage, QIcon, QFont, QShortcut, QTransform, QImageReader, QImageIOHandler
+
+
+class ImagePreviewWindow(QDialog):
+    """图片预览窗口"""
+    
+    def __init__(self, image_path, parent=None):
+        super().__init__(parent)
+        self.image_path = image_path
+        self.original_pixmap = None
+        self.current_scale = 1.0
+        self.rotation_angle = 0  # 旋转角度
+        
+        self.setWindowTitle("图片预览")
+        self.setModal(True)
+        self.resize(800, 600)
+        
+        self.setup_ui()
+        self.load_image()
+        
+    def setup_ui(self):
+        """设置UI"""
+        layout = QVBoxLayout()
+        
+        # 图片显示区域
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setMinimumSize(100, 100)
+        self.image_label.setScaledContents(False)  # 禁用自动缩放，我们手动控制
+        
+        # 启用鼠标追踪以支持滚轮事件
+        self.image_label.setMouseTracking(True)
+        scroll_area.setMouseTracking(True)
+        
+        scroll_area.setWidget(self.image_label)
+        layout.addWidget(scroll_area)
+        
+        # 控制按钮
+        controls_layout = QHBoxLayout()
+        
+        zoom_in_btn = QPushButton("放大")
+        zoom_in_btn.clicked.connect(self.zoom_in)
+        controls_layout.addWidget(zoom_in_btn)
+        
+        zoom_out_btn = QPushButton("缩小")
+        zoom_out_btn.clicked.connect(self.zoom_out)
+        controls_layout.addWidget(zoom_out_btn)
+        
+        fit_btn = QPushButton("适应窗口")
+        fit_btn.clicked.connect(self.fit_to_window)
+        controls_layout.addWidget(fit_btn)
+        
+        original_btn = QPushButton("原始大小")
+        original_btn.clicked.connect(self.original_size)
+        controls_layout.addWidget(original_btn)
+        
+        rotate_left_btn = QPushButton("向左旋转")
+        rotate_left_btn.clicked.connect(lambda: self.rotate_image(-90))
+        controls_layout.addWidget(rotate_left_btn)
+        
+        rotate_right_btn = QPushButton("向右旋转")
+        rotate_right_btn.clicked.connect(lambda: self.rotate_image(90))
+        controls_layout.addWidget(rotate_right_btn)
+        
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(self.close)
+        controls_layout.addWidget(close_btn)
+        
+        layout.addLayout(controls_layout)
+        self.setLayout(layout)
+        
+        # 快捷键
+        QShortcut(Qt.Key_Plus, self, self.zoom_in)
+        QShortcut(Qt.Key_Minus, self, self.zoom_out)
+        QShortcut(Qt.Key_0, self, self.fit_to_window)
+        QShortcut(Qt.Key_1, self, self.original_size)
+        QShortcut(Qt.Key_Left, self, lambda: self.rotate_image(-90))
+        QShortcut(Qt.Key_Right, self, lambda: self.rotate_image(90))
+        QShortcut(Qt.Key_Escape, self, self.close)
+        
+        # 设置滚轮事件过滤器
+        scroll_area.installEventFilter(self)
+        self.image_label.installEventFilter(self)
+        
+    def eventFilter(self, obj, event):
+        """事件过滤器，处理鼠标滚轮事件"""
+        if event.type() == QEvent.Wheel:
+            # 检查是否有Ctrl键按下，如果没有则进行缩放
+            if event.modifiers() & Qt.ControlModifier:
+                delta = event.angleDelta().y()
+                if delta > 0:
+                    self.zoom_in()
+                else:
+                    self.zoom_out()
+                return True
+            else:
+                # 没有Ctrl键时，正常滚动
+                return super().eventFilter(obj, event)
+        return super().eventFilter(obj, event)
+        
+    def load_image(self):
+        """加载图片"""
+        try:
+            if os.path.exists(self.image_path):
+                # 使用QImage加载图片以获取EXIF信息
+                image = QImage(self.image_path)
+                if not image.isNull():
+                    # 获取并应用正确的旋转方向
+                    self.apply_rotation_from_exif(image)
+                    self.original_pixmap = QPixmap.fromImage(image)
+                    if not self.original_pixmap.isNull():
+                        # 默认适应窗口大小
+                        self.fit_to_window()
+                    else:
+                        QMessageBox.warning(self, "错误", "无法加载图片")
+                else:
+                    QMessageBox.warning(self, "错误", "无法加载图片")
+            else:
+                QMessageBox.warning(self, "错误", "图片文件不存在")
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"加载图片失败: {str(e)}")
+            
+    def apply_rotation_from_exif(self, image):
+        """根据EXIF信息应用正确的旋转方向"""
+        try:
+            # 使用QImageReader读取EXIF信息
+            from PySide6.QtGui import QImageReader
+            
+            reader = QImageReader(self.image_path)
+            if reader.canRead():
+                # 获取图片的变换信息（包括旋转）
+                transform = reader.transformation()
+                
+                # 根据变换类型应用旋转
+                if transform == QImageIOHandler.TransformationRotate90:
+                    self.rotation_angle = 90
+                elif transform == QImageIOHandler.TransformationRotate180:
+                    self.rotation_angle = 180
+                elif transform == QImageIOHandler.TransformationRotate270:
+                    self.rotation_angle = 270
+                else:
+                    self.rotation_angle = 0
+                    
+                # 应用旋转到QImage
+                if self.rotation_angle != 0:
+                    transform_matrix = QTransform()
+                    transform_matrix.rotate(self.rotation_angle)
+                    image = image.transformed(transform_matrix, Qt.SmoothTransformation)
+                    
+        except Exception as e:
+            print(f"应用旋转时出错: {e}")
+            self.rotation_angle = 0
+            
+    def wheelEvent(self, event):
+        """处理鼠标滚轮事件"""
+        if event.modifiers() & Qt.ControlModifier:
+            delta = event.angleDelta().y()
+            if delta > 0:
+                self.zoom_in()
+            else:
+                self.zoom_out()
+            event.accept()
+        else:
+            super().wheelEvent(event)
+            
+    def zoom_in(self):
+        """放大"""
+        self.current_scale *= 1.2
+        self.update_image_display()
+        
+    def zoom_out(self):
+        """缩小"""
+        self.current_scale = max(0.1, self.current_scale / 1.2)  # 防止缩放太小
+        self.update_image_display()
+        
+    def fit_to_window(self):
+        """适应窗口"""
+        if self.original_pixmap and not self.original_pixmap.isNull():
+            # 获取可用的显示区域大小（考虑滚动条）
+            scroll_area = self.findChild(QScrollArea)
+            if scroll_area:
+                viewport_size = scroll_area.viewport().size()
+                pixmap_size = self.original_pixmap.size()
+                
+                # 计算缩放比例，留出一些边距
+                margin = 20
+                width_scale = (viewport_size.width() - margin) / pixmap_size.width()
+                height_scale = (viewport_size.height() - margin) / pixmap_size.height()
+                
+                self.current_scale = min(width_scale, height_scale, 1.0)  # 不超过原始大小
+                self.update_image_display()
+                
+    def original_size(self):
+        """原始大小"""
+        self.current_scale = 1.0
+        self.update_image_display()
+        
+    def rotate_image(self, angle):
+        """旋转图片"""
+        self.rotation_angle = (self.rotation_angle + angle) % 360
+        self.update_image_display()
+        
+    def update_image_display(self):
+        """更新图片显示"""
+        if self.original_pixmap and not self.original_pixmap.isNull():
+            try:
+                # 应用缩放和旋转
+                transform = QTransform()
+                transform.scale(self.current_scale, self.current_scale)
+                transform.rotate(self.rotation_angle)
+                
+                # 应用变换
+                transformed_pixmap = self.original_pixmap.transformed(
+                    transform, Qt.SmoothTransformation
+                )
+                
+                self.image_label.setPixmap(transformed_pixmap)
+                
+                # 调整label大小以适应图片
+                self.image_label.setFixedSize(transformed_pixmap.size())
+                
+            except Exception as e:
+                print(f"更新图片显示时出错: {e}")
 
 
 class MainWindow(QMainWindow):
@@ -34,6 +271,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.ui = None
         self.scanner_thread = None
+        self.thumbnail_model = None
         
         # 初始化
         self._init_ui()
@@ -41,7 +279,9 @@ class MainWindow(QMainWindow):
         self._init_window()
         self._load_directories()
         self._setup_scanner()
+        self._setup_thumbnail_view()
         self._start_background_scan()
+        self._load_all_photos()
         
     def _init_ui(self):
         """初始化UI"""
@@ -143,6 +383,44 @@ class MainWindow(QMainWindow):
                 font-weight: bold;
             }
         """)
+
+    def _setup_thumbnail_view(self):
+        """设置缩略图视图"""
+        # 创建模型
+        self.thumbnail_model = QStandardItemModel()
+        self.ui.thum_body.setModel(self.thumbnail_model)
+        
+        # 设置视图属性
+        self.ui.thum_body.setViewMode(QListView.IconMode)
+        self.ui.thum_body.setIconSize(QSize(150, 150))
+        self.ui.thum_body.setGridSize(QSize(170, 200))
+        self.ui.thum_body.setSpacing(10)
+        self.ui.thum_body.setMovement(QListView.Static)
+        self.ui.thum_body.setResizeMode(QListView.Adjust)
+        self.ui.thum_body.setWrapping(True)
+        
+        # 设置样式
+        self.ui.thum_body.setStyleSheet("""
+            QListView {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 4px;
+                padding: 10px;
+            }
+            QListView::item {
+                background-color: white;
+                border: 1px solid #e9ecef;
+                border-radius: 4px;
+                padding: 5px;
+            }
+            QListView::item:hover {
+                border: 2px solid #3498db;
+            }
+            QListView::item:selected {
+                border: 2px solid #2980b9;
+                background-color: #e3f2fd;
+            }
+        """)
     
     def _init_connections(self):
         """初始化信号连接"""
@@ -161,6 +439,12 @@ class MainWindow(QMainWindow):
             self.ui.tree_localdir.itemDoubleClicked.connect(self._on_directory_double_clicked)
             self.ui.tree_localdir.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             self.ui.tree_localdir.customContextMenuRequested.connect(self._show_directory_context_menu)
+            self.ui.tree_localdir.itemClicked.connect(self._on_directory_selected)
+        
+        # 连接缩略图点击事件
+        if hasattr(self.ui, 'thum_body'):
+            self.ui.thum_body.clicked.connect(self._on_thumbnail_clicked)
+            self.ui.thum_body.doubleClicked.connect(self._on_thumbnail_double_clicked)
     
     def _init_window(self):
         """初始化窗口"""
@@ -206,15 +490,20 @@ class MainWindow(QMainWindow):
         if not current:
             return
         
+        nav_text = current.text()
         nav_map = {
             "全部照片": self._load_all_photos,
             "收藏夹": self._load_favorites,
             "相册": self._load_albums
         }
         
-        action = nav_map.get(current.text())
+        action = nav_map.get(nav_text)
         if action:
             action()
+            
+        # 更新标签显示
+        self.ui.label_gridstate.setText(nav_text)
+        self._update_photo_count(nav_text)
     
     def _add_directory(self):
         """添加目录到数据库并自动扫描"""
@@ -345,23 +634,222 @@ class MainWindow(QMainWindow):
         self._load_directories()
     
     def _refresh_data(self):
-        """刷新数据"""
-        health = DatabaseInitializer.check_database_health()
-        message = f"数据库健康: {health['tables_count']} 个表"
-        self._update_status(message)
-        self._refresh_directories()
+        """刷新数据 - 重新生成缩略图"""
+        reply = QMessageBox.question(
+            self, "确认刷新", 
+            "确定要重新生成所有缩略图吗？\n\n"
+            "这将删除现有缩略图并重新生成，\n"
+            "可以修复图片方向显示问题。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            try:
+                # 删除现有缩略图文件和记录
+                import shutil
+                thumbnails_dir = Path("thumbnails")
+                if thumbnails_dir.exists():
+                    shutil.rmtree(thumbnails_dir)
+                
+                # 删除数据库中的缩略图记录
+                with next(get_db()) as db:
+                    db.query(Thumbnail).delete()
+                    db.commit()
+                
+                # 重新扫描图片
+                self._start_background_scan()
+                QMessageBox.information(self, "提示", "正在重新生成缩略图，请稍候...")
+                
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"刷新失败: {str(e)}")
     
     def _load_all_photos(self):
         """加载所有照片"""
         self._update_status("显示所有照片")
-    
+        self._update_photo_count_for_all()
+        self._load_thumbnails_for_all()
+
     def _load_favorites(self):
         """加载收藏照片"""
         self._update_status("显示收藏照片")
-    
+        self._update_photo_count_for_favorites()
+        self._load_thumbnails_for_favorites()
+
     def _load_albums(self):
         """加载相册"""
         self._update_status("显示相册")
+        self._update_photo_count_for_albums()
+        self._load_thumbnails_for_albums()
+
+    def _update_photo_count(self, nav_text):
+        """根据导航类型更新图片数量"""
+        try:
+            with next(get_db()) as db:
+                if nav_text == "全部照片":
+                    count = db.query(Image).count()
+                elif nav_text == "收藏夹":
+                    count = db.query(Image).filter(Image.is_favorite == True).count()
+                elif nav_text == "相册":
+                    # 这里可能需要根据相册逻辑调整
+                    count = 0  # 暂时返回0，后续实现相册功能
+                else:
+                    count = 0
+                
+                self.ui.label_photo_count.setText(f"{count} 张照片")
+        except Exception as e:
+            print(f"更新图片数量失败: {e}")
+            self.ui.label_photo_count.setText("0 张照片")
+
+    def _update_photo_count_for_directory(self, directory_path):
+        """更新指定目录及其子目录的图片数量"""
+        try:
+            import os
+            normalized_path = os.path.normpath(str(directory_path))
+            
+            with next(get_db()) as db:
+                # 使用路径前缀匹配来获取目录及其子目录的所有图片
+                search_pattern = f"{normalized_path}%"
+                images = db.query(Image).filter(
+                    Image.file_path.like(search_pattern)
+                ).all()
+                
+                count = len(images) if images else 0
+                self.ui.label_photo_count.setText(f"{count} 张照片")
+        except Exception as e:
+            print(f"更新目录图片数量失败: {e}")
+            self.ui.label_photo_count.setText("0 张照片")
+
+    def _update_photo_count_for_all(self):
+        """更新所有照片的数量"""
+        self._update_photo_count("全部照片")
+
+    def _update_photo_count_for_favorites(self):
+        """更新收藏照片的数量"""
+        self._update_photo_count("收藏夹")
+
+    def _update_photo_count_for_albums(self):
+        """更新相册的数量"""
+        self._update_photo_count("相册")
+
+    def _load_thumbnails_for_all(self):
+        """加载所有照片的缩略图"""
+        self._load_thumbnails_from_query(lambda db: db.query(Image).all())
+
+    def _load_thumbnails_for_favorites(self):
+        """加载收藏照片的缩略图"""
+        self._load_thumbnails_from_query(lambda db: db.query(Image).filter(Image.is_favorite == True).all())
+
+    def _load_thumbnails_for_albums(self):
+        """加载相册的缩略图"""
+        # 相册功能暂未实现，显示空
+        self.thumbnail_model.clear()
+
+    def _load_thumbnails_for_directory(self, directory_path):
+        """加载指定目录及其子目录的缩略图"""
+        try:
+            import os
+            normalized_path = os.path.normpath(str(directory_path))
+            
+            with next(get_db()) as db:
+                # 使用路径前缀匹配来获取目录及其子目录的所有图片
+                search_pattern = f"{normalized_path}%"
+                images = db.query(Image).filter(
+                    Image.file_path.like(search_pattern)
+                ).all()
+                
+                if images:
+                    self._display_thumbnails(images)
+                else:
+                    # 如果没有找到图片，检查是否是已注册的目录
+                    directory = db.query(Directory).filter(Directory.path == normalized_path).first()
+                    if directory:
+                        # 获取该目录的图片
+                        images = db.query(Image).filter(Image.directory_id == directory.id).all()
+                        self._display_thumbnails(images)
+                    else:
+                        self.thumbnail_model.clear()
+        except Exception as e:
+            print(f"加载目录缩略图失败: {e}")
+            self.thumbnail_model.clear()
+
+    def _load_thumbnails_from_query(self, query_func):
+        """从查询函数加载缩略图"""
+        try:
+            with next(get_db()) as db:
+                images = query_func(db)
+                self._display_thumbnails(images)
+        except Exception as e:
+            print(f"加载缩略图失败: {e}")
+            self.thumbnail_model.clear()
+
+    def _get_rotation_angle(self, orientation_str):
+        """根据EXIF方向信息获取旋转角度"""
+        if not orientation_str:
+            return 0
+            
+        orientation_map = {
+            'Horizontal (normal)': 0,
+            'Rotate 90 CW': 90,
+            'Rotate 180': 180,
+            'Rotate 270 CW': 270,
+            'Mirror horizontal': 0,  # 不处理镜像
+            'Mirror vertical': 0,      # 不处理镜像
+            'Mirror horizontal and rotate 270 CW': 0,  # 不处理镜像
+            'Mirror horizontal and rotate 90 CW': 0    # 不处理镜像
+        }
+        
+        return orientation_map.get(orientation_str, 0)
+    
+    def _rotate_pixmap(self, pixmap, angle):
+        """旋转QPixmap"""
+        if angle == 0:
+            return pixmap
+            
+        transform = QtGui.QTransform()
+        transform.rotate(angle)
+        return pixmap.transformed(transform, Qt.TransformationMode.SmoothTransformation)
+    
+    def _display_thumbnails(self, images):
+        """显示缩略图（带方向修正）"""
+        self.thumbnail_model.clear()
+        
+        for image in images:
+            try:
+                # 获取缩略图路径
+                with next(get_db()) as db:
+                    thumbnail = db.query(Thumbnail).filter(Thumbnail.image_id == image.id).first()
+                    thumbnail_path = thumbnail.thumbnail_path if thumbnail else None
+                
+                if thumbnail_path and os.path.exists(thumbnail_path):
+                    # 创建缩略图项
+                    item = QStandardItem()
+                    
+                    # 加载缩略图
+                    pixmap = QPixmap(thumbnail_path)
+                    if not pixmap.isNull():
+                        # 根据EXIF方向信息旋转缩略图
+                        rotation_angle = self._get_rotation_angle(image.orientation)
+                        if rotation_angle != 0:
+                            pixmap = self._rotate_pixmap(pixmap, rotation_angle)
+                        item.setIcon(pixmap)
+                    else:
+                        # 如果缩略图加载失败，使用占位符
+                        item.setIcon(qta.icon('fa5s.image', color='#95a5a6', scale_factor=1.5))
+                else:
+                    # 没有缩略图，使用占位符
+                    item.setIcon(qta.icon('fa5s.image', color='#95a5a6', scale_factor=1.5))
+                
+                # 设置文件名作为文本
+                item.setText(image.file_name)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item.setData(image.file_path, Qt.ItemDataRole.UserRole)  # 存储完整路径
+                item.setData(image.id, Qt.ItemDataRole.UserRole + 1)  # 存储图片ID
+                
+                self.thumbnail_model.appendRow(item)
+                
+            except Exception as e:
+                print(f"加载缩略图项失败: {e}")
     
     def _open_settings(self):
         """打开设置"""
@@ -379,6 +867,20 @@ class MainWindow(QMainWindow):
                 self._refresh_directory_item(item, str(directory_path))
         else:
             QMessageBox.warning(self, "警告", f"目录不存在: {directory_path}")
+    
+    def _on_directory_selected(self, item):
+        """目录被选中"""
+        directory_path = item.data(0, Qt.ItemDataRole.UserRole)
+        if directory_path and os.path.exists(str(directory_path)):
+            # 获取目录名称
+            directory_name = os.path.basename(str(directory_path))
+            if not directory_name:  # 根目录的情况
+                directory_name = str(directory_path)
+            
+            # 更新标签显示
+            self.ui.label_gridstate.setText(directory_name)
+            self._update_photo_count_for_directory(str(directory_path))
+            self._load_thumbnails_for_directory(str(directory_path))
     
     def _show_directory_context_menu(self, position):
         """显示目录右键菜单"""
@@ -581,6 +1083,239 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(False)
         self.status_label.setText("扫描错误")
         QMessageBox.warning(self, "扫描错误", error_msg)
+
+    def _on_thumbnail_clicked(self, index):
+        """处理缩略图点击事件，显示图片详情"""
+        if not index.isValid():
+            return
+            
+        # 获取图片ID和文件路径
+        image_id = index.data(Qt.ItemDataRole.UserRole + 1)
+        file_path = index.data(Qt.ItemDataRole.UserRole)
+        
+        if not image_id or not file_path:
+            return
+            
+        try:
+            # 从数据库获取图片详细信息
+            with next(get_db()) as db:
+                image = db.query(Image).filter(Image.id == image_id).first()
+                if not image:
+                    return
+                
+                # 显示图片预览
+                self._display_image_preview(file_path, image.orientation)
+                
+                # 显示EXIF信息
+                self._display_exif_info(image)
+                
+        except Exception as e:
+            print(f"显示图片详情失败: {e}")
+
+    def _on_thumbnail_double_clicked(self, index):
+        """处理缩略图双击事件，打开完整图片预览窗口"""
+        try:
+            if not index.isValid():
+                return
+                
+            # 获取图片文件路径
+            item = self.thumbnail_model.itemFromIndex(index)
+            if not item:
+                return
+                
+            image_path = item.data(Qt.UserRole)
+            if not image_path or not os.path.exists(image_path):
+                QMessageBox.warning(self, "警告", "图片文件不存在")
+                return
+                
+            # 创建并显示图片预览窗口
+            preview_window = ImagePreviewWindow(image_path, self)
+            preview_window.exec_()  # 模态显示
+            
+        except Exception as e:
+            print(f"打开图片预览失败: {e}")
+            QMessageBox.warning(self, "错误", f"无法打开图片预览: {str(e)}")
+
+    def _display_image_preview(self, file_path, orientation):
+        """显示图片预览"""
+        try:
+            if hasattr(self.ui, 'image_preview'):
+                # 加载图片
+                pixmap = QPixmap(file_path)
+                if not pixmap.isNull():
+                    # 根据EXIF方向信息旋转图片
+                    rotation_angle = self._get_rotation_angle(orientation)
+                    if rotation_angle != 0:
+                        pixmap = self._rotate_pixmap(pixmap, rotation_angle)
+                    
+                    # 缩放图片以适应预览区域
+                    if hasattr(self.ui, 'preview_container'):
+                        preview_size = self.ui.preview_container.size()
+                        scaled_pixmap = pixmap.scaled(
+                            preview_size, 
+                            Qt.AspectRatioMode.KeepAspectRatio, 
+                            Qt.TransformationMode.SmoothTransformation
+                        )
+                        self.ui.image_preview.setPixmap(scaled_pixmap)
+                        self.ui.image_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        except Exception as e:
+            print(f"显示图片预览失败: {e}")
+
+    def _display_exif_info(self, image):
+        """显示EXIF信息，处理所有可能的缺失值和字符编码问题"""
+        try:
+            def clean_text(text, default="未知"):
+                """彻底清理文本，确保只包含可显示的字符"""
+                if text is None:
+                    return default
+                try:
+                    # 转换为字符串并去除空白
+                    str_text = str(text).strip()
+                    
+                    # 检查是否为无效值
+                    if not str_text or str_text.lower() in ['none', 'null', 'undefined', '']:
+                        return default
+                    
+                    # 检查是否包含非打印字符
+                    import re
+                    # 移除非打印字符和控制字符，但保留常见标点符号
+                    clean_str = re.sub(r'[^\x20-\x7E\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]', '', str_text)
+                    
+                    # 如果清理后为空，返回默认值
+                    if not clean_str.strip():
+                        return default
+                    
+                    return clean_str.strip()
+                except Exception:
+                    return default
+            
+            def safe_display(value, prefix="", suffix="", default="未知"):
+                """安全显示带前缀后缀的值"""
+                clean_value = clean_text(value, default)
+                if clean_value == default:
+                    return default
+                return f"{prefix}{clean_value}{suffix}"
+            
+            # 基本信息显示
+            if hasattr(self.ui, 'value_filename'):
+                filename = clean_text(image.file_name)
+                self.ui.value_filename.setText(f"文件名: {filename}")
+            
+            if hasattr(self.ui, 'value_dimensions'):
+                try:
+                    width = int(image.width) if image.width and str(image.width).strip().isdigit() else None
+                    height = int(image.height) if image.height and str(image.height).strip().isdigit() else None
+                    if width and height:
+                        dimensions = f"尺寸: {width} × {height}"
+                    else:
+                        dimensions = "尺寸: 未知"
+                except:
+                    dimensions = "尺寸: 未知"
+                self.ui.value_dimensions.setText(dimensions)
+            
+            # 相机信息显示
+            if hasattr(self.ui, 'value_camera_model'):
+                make = clean_text(image.camera_make)
+                model = clean_text(image.camera_model)
+                if make != "未知" and model != "未知":
+                    camera_info = f"{make} {model}"
+                elif make != "未知":
+                    camera_info = make
+                elif model != "未知":
+                    camera_info = model
+                else:
+                    camera_info = "未知"
+                self.ui.value_camera_model.setText(camera_info)
+            
+            if hasattr(self.ui, 'value_lens'):
+                lens = clean_text(image.lens_model)
+                self.ui.value_lens.setText(lens)
+            
+            if hasattr(self.ui, 'value_date'):
+                date_str = "未知"
+                if image.date_taken:
+                    try:
+                        from datetime import datetime
+                        if isinstance(image.date_taken, str):
+                            # 如果是字符串，尝试解析
+                            date_str = image.date_taken.strip()
+                            if len(date_str) < 3:  # 太短，可能是无效值
+                                date_str = "未知"
+                        else:
+                            # 如果是datetime对象
+                            date_str = image.date_taken.strftime("%Y-%m-%d %H:%M:%S")
+                    except:
+                        date_str = "未知"
+                elif image.created_at:
+                    try:
+                        date_str = image.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                    except:
+                        date_str = "未知"
+                else:
+                    date_str = "未知"
+                self.ui.value_date.setText(date_str)
+            
+            # 曝光参数显示
+            if hasattr(self.ui, 'value_aperture'):
+                try:
+                    aperture = float(str(image.aperture).strip())
+                    if aperture > 0:
+                        aperture_str = f"f/{aperture:.1f}"
+                    else:
+                        aperture_str = "未知"
+                except:
+                    aperture_str = "未知"
+                self.ui.value_aperture.setText(aperture_str)
+            
+            if hasattr(self.ui, 'value_shutter'):
+                shutter = clean_text(image.shutter_speed)
+                self.ui.value_shutter.setText(shutter)
+            
+            if hasattr(self.ui, 'value_iso'):
+                try:
+                    iso = int(str(image.iso).strip())
+                    if iso > 0:
+                        iso_str = f"ISO {iso}"
+                    else:
+                        iso_str = "未知"
+                except:
+                    iso_str = "未知"
+                self.ui.value_iso.setText(iso_str)
+            
+            if hasattr(self.ui, 'value_focal'):
+                try:
+                    focal = float(str(image.focal_length).strip())
+                    focal_35 = float(str(image.focal_length_35mm).strip()) if image.focal_length_35mm else None
+                    if focal > 0:
+                        if focal_35 and focal_35 > 0:
+                            focal_str = f"{int(focal)}mm (35mm等效: {int(focal_35)}mm)"
+                        else:
+                            focal_str = f"{int(focal)}mm"
+                    else:
+                        focal_str = "未知"
+                except:
+                    focal_str = "未知"
+                self.ui.value_focal.setText(focal_str)
+            
+            # GPS信息显示
+            if hasattr(self.ui, 'value_gps'):
+                try:
+                    lat = float(str(image.gps_latitude).strip()) if image.gps_latitude else None
+                    lon = float(str(image.gps_longitude).strip()) if image.gps_longitude else None
+                    alt = float(str(image.gps_altitude).strip()) if image.gps_altitude else None
+                    
+                    if lat is not None and lon is not None:
+                        gps_text = f"{lat:.6f}, {lon:.6f}"
+                        if alt is not None and abs(alt) > 0.1:
+                            gps_text += f" (海拔: {int(alt)}m)"
+                    else:
+                        gps_text = "未知"
+                except:
+                    gps_text = "未知"
+                self.ui.value_gps.setText(gps_text)
+                
+        except Exception as e:
+            print(f"显示EXIF信息失败: {e}")
 
     def _update_status(self, message):
         """更新状态"""
